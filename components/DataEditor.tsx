@@ -43,14 +43,17 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
 
   const handleMappingChange = (col: string, type: ColumnType) => {
     setMappings(prev => ({ ...prev, [col]: type }));
-    // Reset selected ID if we switch away from NAME
-    if (type !== ColumnType.NAME) {
-       // logic if needed
-    }
+    // No specific reset logic needed here as handleValueChange handles validation state
   };
 
   const handleValueChange = (col: string, val: string) => {
     setFormData(prev => ({ ...prev, [col]: val }));
+    
+    // If we are editing the text of a column mapped to NAME manually, 
+    // we must reset the selected ID because the text might no longer match the previous selection.
+    if (mappings[col] === ColumnType.NAME) {
+        setSelectedNameId(null);
+    }
   };
 
   const handleSubmit = async () => {
@@ -70,6 +73,7 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
         }
 
         // Construct Payload
+        // The requirement is: "send data from form with type that choose in combo box and value from inbox"
         const mappedData: Record<string, any> = {};
         let hasActiveMappings = false;
         
@@ -82,10 +86,10 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
             hasActiveMappings = true;
 
             if (type === ColumnType.NAME) {
-                // Name Handling: Send ID
+                // Name Handling: Send ID from list that was chosen
                 let finalId = selectedNameId;
                 
-                // If ID is not set (user typed manually), try to find exact match
+                // Fallback: If ID is not set (e.g. user typed manually exact match), try to find exact match
                 if (!finalId && value) {
                     const normalizedVal = String(value).trim();
                     const match = MOCK_NAMES_DB.find(item => item.name === normalizedVal);
@@ -94,20 +98,40 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
                     }
                 }
                 
+                // Set the value for the 'name' key to the ID
                 mappedData[type] = finalId;
             } else {
-                // Numeric fields validation
+                // Numeric fields (cow, sheep, goat)
+                // Get value from inbox (input box)
                 const rawVal = String(value || '').trim();
-                // Convert Persian digits to English and remove commas
-                const cleanVal = toEnglishDigits(rawVal).replace(/,/g, '');
+                
+                // Convert Persian digits to English
+                let cleanVal = toEnglishDigits(rawVal);
+                
+                // Remove commas (English , and Persian ،), spaces, and ensure only digits/dots/minus remain
+                // This handles cases like "۱,۲۰۰" or " 12 " or "12 cows" (strips text)
+                cleanVal = cleanVal.replace(/[,،\s]/g, '');
 
+                // Aggressive check: if it's still NaN, stripping non-numeric chars might help 
+                // but let's first check if the basic clean worked.
                 let numVal = 0;
+                
                 if (cleanVal !== '') {
-                    numVal = Number(cleanVal);
-                    if (isNaN(numVal)) {
-                        throw new Error(`Value for '${col}' must be a valid number.`);
-                    }
+                     if (!isNaN(Number(cleanVal))) {
+                         numVal = Number(cleanVal);
+                     } else {
+                         // Fallback: Remove all non-numeric characters (except . and -)
+                         // This catches hidden chars or text mixed with numbers
+                         const aggressiveClean = cleanVal.replace(/[^0-9.-]/g, '');
+                         if (aggressiveClean !== '' && !isNaN(Number(aggressiveClean))) {
+                             numVal = Number(aggressiveClean);
+                         } else {
+                             throw new Error(`Value for '${col}' must be a valid number.`);
+                         }
+                     }
                 }
+                
+                // Set the value for the type key (e.g. mappedData['cow'] = 5)
                 mappedData[type] = numVal;
             }
         }
@@ -117,15 +141,14 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
         }
 
         const payload: ApiPayload = {
-            date: cleanDate, // Use the sanitized english digit date
-            mappedData,      // Contains type:value (e.g., name: 101, cow: 10)
+            date: cleanDate, 
+            mappedData,
             rawRowData: row
         };
 
         console.log("Sending Payload to " + API_URL, payload);
 
-        // 2. Mock API Call with potential error simulation logic if needed
-        // In real scenario:
+        // 2. Mock API Call 
         /*
         const response = await fetch(API_URL, {
             method: 'POST',
@@ -175,14 +198,17 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
                     value={value} 
                     onChange={(e) => handleValueChange(col, e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded text-right"
+                    placeholder="Start typing to search..."
                 />
                 <div className="bg-gray-50 p-2 rounded border border-gray-200 max-h-40 overflow-y-auto">
-                    <p className="text-xs text-gray-400 mb-1">Suggested Matches:</p>
+                    <p className="text-xs text-gray-400 mb-1">Suggested Matches (Click to Select):</p>
                     {suggestions.map(s => (
                         <div 
                             key={s.id}
                             onClick={() => {
-                                handleValueChange(col, s.name); // Update text to match official name
+                                // Update text in inbox
+                                setFormData(prev => ({ ...prev, [col]: s.name }));
+                                // Set ID for payload
                                 setSelectedNameId(s.id);
                             }}
                             className={`flex justify-between items-center p-2 rounded cursor-pointer text-sm ${selectedNameId === s.id ? 'bg-blue-100 text-blue-800 border-blue-200 border' : 'hover:bg-gray-100'}`}
@@ -197,7 +223,6 @@ const DataEditor: React.FC<DataEditorProps> = ({ row, columns, globalDate, onClo
     }
 
     // Number inputs for livestock
-    // Using type="text" to prevent browser clearing the input if user switches type while data is text
     return (
         <div className="mt-2">
             <label className="text-xs text-gray-500">Value</label>
