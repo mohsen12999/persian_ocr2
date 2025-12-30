@@ -1,0 +1,5 @@
+{
+  "name": "Persian Data Extractor & Manager",
+  "description": "An AI-powered application to extract Persian/Arabic tabular data from images, manage mappings, perform fuzzy name matching, and export data.",
+  "requestFramePermissions": []
+}
